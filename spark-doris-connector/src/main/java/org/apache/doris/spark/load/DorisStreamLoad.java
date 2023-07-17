@@ -14,6 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 package org.apache.doris.spark.load;
 
 import org.apache.doris.spark.cfg.ConfigurationOptions;
@@ -90,6 +91,8 @@ public class DorisStreamLoad implements Serializable {
     private String columns;
     private String maxFilterRatio;
     private Map<String, String> streamLoadProp;
+    private boolean trimDoubleQuotes;
+    private boolean addDoubleQuotes;
     private static final long cacheExpireTimeout = 4 * 60;
     private final LoadingCache<String, List<BackendV2.BackendRowV2>> cache;
     private final String fileType;
@@ -110,6 +113,8 @@ public class DorisStreamLoad implements Serializable {
         fileType = streamLoadProp.getOrDefault("format", "csv");
         if ("csv".equals(fileType)) {
             FIELD_DELIMITER = escapeString(streamLoadProp.getOrDefault("column_separator", "\t"));
+            this.trimDoubleQuotes = Boolean.parseBoolean(streamLoadProp.getOrDefault("trim_double_quotes", "false"));
+            this.addDoubleQuotes = Boolean.parseBoolean(streamLoadProp.getOrDefault("add_double_quotes", "false"));
         } else if ("json".equalsIgnoreCase(fileType)) {
             readJsonByLine = Boolean.parseBoolean(streamLoadProp.getOrDefault("read_json_by_line", "false"));
             boolean stripOuterArray = Boolean.parseBoolean(streamLoadProp.getOrDefault("strip_outer_array", "false"));
@@ -381,13 +386,23 @@ public class DorisStreamLoad implements Serializable {
         switch (fileType.toUpperCase()) {
 
             case "CSV":
-                loadDataList = Collections.singletonList(
-                        rows.stream()
-                                .map(row -> row.stream()
-                                        .map(DataUtil::handleColumnValue)
-                                        .map(Object::toString)
-                                        .collect(Collectors.joining(FIELD_DELIMITER))
-                                ).collect(Collectors.joining(LINE_DELIMITER)));
+                    loadDataList = Collections.singletonList(
+                            rows.stream()
+                                    .map(row -> row.stream()
+                                            .map(DataUtil::handleColumnValue)
+                                            .map(Object::toString)
+                                            .collect(Collectors.joining(FIELD_DELIMITER))
+                                    ).collect(Collectors.joining(LINE_DELIMITER)));
+                } else {
+                    loadDataList = Collections.singletonList(
+                            rows.stream()
+                                    .map(row -> row.stream()
+                                            .map(DataUtil::handleColumnValue)
+                                            .map(Object::toString)
+                                            .collect(Collectors.joining(FIELD_DELIMITER))
+                                    ).collect(Collectors.joining(LINE_DELIMITER)));
+                }
+
                 break;
             case "JSON":
                 List<Map<Object, Object>> dataList = new ArrayList<>();

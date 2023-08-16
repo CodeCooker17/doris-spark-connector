@@ -18,7 +18,6 @@
 package org.apache.doris.spark.writer
 
 import org.apache.doris.spark.cfg.{ConfigurationOptions, SparkSettings}
-import org.apache.doris.spark.listener.DorisTransactionListener
 import org.apache.doris.spark.load.{CachedDorisStreamLoadClient, DorisStreamLoad}
 import org.apache.doris.spark.sql.Utils
 import org.apache.spark.sql.DataFrame
@@ -29,7 +28,6 @@ import java.time.Duration
 import java.util
 import java.util.Objects
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 import scala.util.{Failure, Success}
 
 class DorisWriter(settings: SparkSettings) extends Serializable {
@@ -51,6 +49,8 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     ConfigurationOptions.SINK_BLOCKING_TRIGGER_KEYS_DEFAULT)
   private val maxBlockInterValMs: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_MAX_BLOCKING_INTERVAL_MS,
     ConfigurationOptions.SINK_MAX_BLOCKING_INTERVAL_MS_DEFAULT)
+  private val blockingIndexBase: Integer = settings.getIntegerProperty(ConfigurationOptions.SINK_BLOCKING_INDEX_BASE,
+    ConfigurationOptions.SINK_BLOCKING_INDEX_BASE_DEFAULT)
   private val blockTriggerKeysArray: Array[String] = blockTriggerKeys.split(",")
 
   private val enable2PC: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_ENABLE_2PC,
@@ -84,7 +84,8 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
      *
      */
     def flush(batch: Iterable[util.List[Object]], dfColumns: Array[String]): Unit = {
-      Utils.retry[util.List[Integer], Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong), Duration.ofMillis(maxBlockInterValMs.toLong), blockTriggerKeysArray, logger) {
+      Utils.retry[Unit, Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong),
+        Duration.ofMillis(maxBlockInterValMs.toLong), blockTriggerKeysArray, blockingIndexBase, logger) {
         dorisStreamLoader.loadV2(batch.toList.asJava, dfColumns, enable2PC)
       } match {
         case Success(txnIds) => if (enable2PC) txnIds.asScala.foreach(txnId => preCommittedTxnAcc.add(txnId))

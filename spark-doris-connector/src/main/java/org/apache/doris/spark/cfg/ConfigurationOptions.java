@@ -96,7 +96,7 @@ public interface ConfigurationOptions {
     String DORIS_SINK_MAX_BLOCKING_INTERVAL_MS = "doris.sink.max.blocking.interval.ms";
     int SINK_MAX_BLOCKING_INTERVAL_MS_DEFAULT = 1000;
 
-    String SINK_BLOCKING_INDEX_BASE = "doris.sink.blocking.qbase.index";
+    String SINK_BLOCKING_INDEX_BASE = "doris.sink.blocking.base.index";
     int SINK_BLOCKING_INDEX_BASE_DEFAULT = 2;
 
     String DORIS_SINK_BLOCKING_TRIGGER_KEYS = "doris.sink.block.trigger.keys";

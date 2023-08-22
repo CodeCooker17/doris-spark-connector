@@ -200,4 +200,22 @@ private[spark] object Utils {
         Failure(exception)
     }
   }
+
+  @tailrec
+  def retry[R, T <: Throwable : ClassTag](retryTimes: Int, interval: Duration, logger: Logger)(f: => R): Try[R] = {
+    assert(retryTimes >= 0)
+    val result = Try(f)
+    result match {
+      case Success(result) =>
+        LockSupport.parkNanos(interval.toNanos)
+        Success(result)
+      case Failure(exception: T) if retryTimes > 0 =>
+        logger.warn(s"Execution failed caused by: ", exception)
+        logger.warn(s"$retryTimes times retry remaining, the next will be in ${interval.toMillis}ms")
+        logger.warn(s"$retryTimes times retry remaining, the next attempt will be in ${interval.toMillis} ms")
+        LockSupport.parkNanos(interval.toNanos)
+        retry(retryTimes - 1, interval, logger)(f)
+      case Failure(exception) => Failure(exception)
+    }
+  }
 }

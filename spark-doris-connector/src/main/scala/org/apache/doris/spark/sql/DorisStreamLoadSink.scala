@@ -34,6 +34,7 @@ private[sql] class DorisStreamLoadSink(sqlContext: SQLContext, settings: SparkSe
     if (batchId <= latestBatchId) {
       logger.info(s"Skipping already committed batch $batchId")
     } else {
+      logger.info(s"Start write batch id: $batchId, last batch id: $latestBatchId")
       writer.write(data)
       latestBatchId = batchId
     }

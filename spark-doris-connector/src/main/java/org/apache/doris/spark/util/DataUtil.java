@@ -47,4 +47,22 @@ public class DataUtil {
 
     }
 
+    public static Object handleColumnValueAddQuotes(Object value) {
+
+        if (value == null) {
+            return NULL_VALUE;
+        }
+
+        if (value instanceof Timestamp) {
+            return value.toString();
+        }
+
+        if (value instanceof WrappedArray) {
+
+            Object[] arr = JavaConversions.seqAsJavaList((WrappedArray) value).toArray();
+            return Arrays.toString(arr);
+        }
+
+        return "\"" + value + "\"";
+    }
 }

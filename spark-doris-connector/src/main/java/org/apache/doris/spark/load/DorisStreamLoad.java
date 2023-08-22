@@ -384,12 +384,12 @@ public class DorisStreamLoad implements Serializable {
         List<String> loadDataList;
 
         switch (fileType.toUpperCase()) {
-
             case "CSV":
+                if(addDoubleQuotes && trimDoubleQuotes){
                     loadDataList = Collections.singletonList(
                             rows.stream()
                                     .map(row -> row.stream()
-                                            .map(DataUtil::handleColumnValue)
+                                            .map(DataUtil::handleColumnValueAddQuotes)
                                             .map(Object::toString)
                                             .collect(Collectors.joining(FIELD_DELIMITER))
                                     ).collect(Collectors.joining(LINE_DELIMITER)));

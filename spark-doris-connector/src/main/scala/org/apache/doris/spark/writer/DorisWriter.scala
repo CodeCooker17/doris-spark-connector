@@ -18,6 +18,7 @@
 package org.apache.doris.spark.writer
 
 import org.apache.doris.spark.cfg.{ConfigurationOptions, SparkSettings}
+import org.apache.doris.spark.listener.DorisTransactionListener
 import org.apache.doris.spark.load.{CachedDorisStreamLoadClient, DorisStreamLoad}
 import org.apache.doris.spark.sql.Utils
 import org.apache.spark.sql.DataFrame
@@ -28,6 +29,7 @@ import java.time.Duration
 import java.util
 import java.util.Objects
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.util.{Failure, Success}
 
 class DorisWriter(settings: SparkSettings) extends Serializable {
@@ -63,6 +65,7 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     val sc = dataFrame.sqlContext.sparkContext
     val preCommittedTxnAcc = sc.collectionAccumulator[Int]("preCommittedTxnAcc")
     if (enable2PC) {
+      logger.info("enable 2PC, add DorisTransactionListener.")
       sc.addSparkListener(new DorisTransactionListener(preCommittedTxnAcc, dorisStreamLoader))
     }
 
@@ -84,11 +87,14 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
      *
      */
     def flush(batch: Iterable[util.List[Object]], dfColumns: Array[String]): Unit = {
-      Utils.retry[Unit, Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong),
+      Utils.retry[util.List[Integer], Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong),
         Duration.ofMillis(maxBlockInterValMs.toLong), blockTriggerKeysArray, blockingIndexBase, logger) {
         dorisStreamLoader.loadV2(batch.toList.asJava, dfColumns, enable2PC)
       } match {
-        case Success(txnIds) => if (enable2PC) txnIds.asScala.foreach(txnId => preCommittedTxnAcc.add(txnId))
+        case Success(txnIds) => if (enable2PC) {
+          txnIds.asScala.foreach(txnId => preCommittedTxnAcc.add(txnId))
+          logger.info("success add txnIds: {}", txnIds.asScala.mkString(","))
+        }
         case Failure(e) =>
           if (enable2PC) {
             // if task run failed, acc value will not be returned to driver,

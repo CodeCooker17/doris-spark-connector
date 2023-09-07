@@ -17,6 +17,7 @@
 
 package org.apache.doris.spark.rest;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_FENODES;
 import static org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_TABLET_SIZE;
 import static org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_TABLET_SIZE_DEFAULT;
@@ -24,6 +25,7 @@ import static org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_TABLET_SIZE_
 import static org.apache.doris.spark.cfg.ConfigurationOptions.DORIS_TABLE_IDENTIFIER;
 import static org.hamcrest.core.StringStartsWith.startsWith;
 
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,6 +37,9 @@ import java.util.Set;
 
 import org.apache.doris.spark.cfg.PropertiesSettings;
 import org.apache.doris.spark.cfg.Settings;
+import org.apache.doris.spark.etl.EtlPartitionInfo;
+import org.apache.doris.spark.etl.EtlPartitionInfo.EtlPartition;
+import org.apache.doris.spark.etl.EtlSchema;
 import org.apache.doris.spark.exception.DorisException;
 import org.apache.doris.spark.exception.IllegalArgumentException;
 import org.apache.doris.spark.rest.models.BackendRow;
@@ -322,5 +327,25 @@ public class TestRestService {
         String response = "{\"backends\":[{\"ip\":\"192.168.1.1\",\"http_port\":8042,\"is_alive\":true}, {\"ip\":\"192.168.1.2\",\"http_port\":8042,\"is_alive\":true}]}";
         List<BackendV2.BackendRowV2> backendRows = RestService.parseBackendV2(response, logger);
         Assert.assertEquals(2, backendRows.size());
+    }
+
+    @Test
+    public void testParseEtlSchema() throws DorisException {
+        String response
+                = "{\"columns\":[{\"columnName\":\"id\",\"columnType\":\"BIGINT\""
+                + ",\"isAllowNull\":false,\"isKey\":true,\"aggregationType\":null,\"defaultValue\":null,\"stringLength\":0"
+                + ",\"precision\":0,\"scale\":0,\"defineExpr\":null},{\"columnName\":\"topic\",\"columnType\":\"STRING\""
+                + ",\"isAllowNull\":true,\"isKey\":false,\"aggregationType\":\"NONE\",\"defaultValue\":\"\\\\N\""
+                + ",\"stringLength\":2147483643,\"precision\":0,\"scale\":0,\"defineExpr\":null}"
+                + ",{\"columnName\":\"cluster\",\"columnType\":\"STRING\",\"isAllowNull\":true,\"isKey\":false"
+                + ",\"aggregationType\":\"NONE\",\"defaultValue\":\"\\\\N\",\"stringLength\":2147483643,\"precision\":0"
+                + ",\"scale\":0,\"defineExpr\":null}],\"partitionInfo\":{\"partitionType\":\"LIST\""
+                + ",\"partitionColumnRefs\":[\"id\"],\"distributionColumnRefs\":[\"id\"],\"partitions\":"
+                + "[{\"partitionId\":183062,\"startKeys\":[5,6],\"endKeys\":[],\"isMaxPartition\":false,\"bucketNum\":10}"
+                + ",{\"partitionId\":183060,\"startKeys\":[1,2],\"endKeys\":[],\"isMaxPartition\":false,\"bucketNum\":10}"
+                + ",{\"partitionId\":183061,\"startKeys\":[3,4],\"endKeys\":[],\"isMaxPartition\":false,\"bucketNum\":10}]}}";
+
+        EtlSchema etlSchema = RestService.parseEtlSchema(response, logger);
+        Assert.assertNotNull(etlSchema);
     }
 }

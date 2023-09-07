@@ -33,6 +33,7 @@ class DorisTransactionListener(preCommittedTxnAcc: CollectionAccumulator[Int], d
 
   val logger: Logger = LoggerFactory.getLogger(classOf[DorisTransactionListener])
 
+  val COMMIT_INTERVAL_MILLIS = 10;
   override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = {
     val txnIds: mutable.Buffer[Int] = preCommittedTxnAcc.value.asScala
     val failedTxnIds = mutable.Buffer[Int]()
@@ -45,7 +46,7 @@ class DorisTransactionListener(preCommittedTxnAcc: CollectionAccumulator[Int], d
         }
         logger.info("job run succeed, start committing transactions")
         txnIds.foreach(txnId =>
-          Utils.retry(3, Duration.ofSeconds(1), logger) {
+          Utils.retry(3, Duration.ofMillis(COMMIT_INTERVAL_MILLIS), logger) {
             dorisStreamLoad.commit(txnId)
           } match {
             case Success(_) =>
@@ -66,7 +67,7 @@ class DorisTransactionListener(preCommittedTxnAcc: CollectionAccumulator[Int], d
         }
         logger.info("job run failed, start aborting transactions")
         txnIds.foreach(txnId =>
-          Utils.retry(3, Duration.ofSeconds(1), logger) {
+          Utils.retry(3, Duration.ofMillis(COMMIT_INTERVAL_MILLIS), logger) {
             dorisStreamLoad.abort(txnId)
           } match {
             case Success(_) =>

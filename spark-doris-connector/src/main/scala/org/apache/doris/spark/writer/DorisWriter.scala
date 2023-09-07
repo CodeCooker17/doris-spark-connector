@@ -20,21 +20,25 @@ package org.apache.doris.spark.writer
 import org.apache.doris.spark.cfg.{ConfigurationOptions, SparkSettings}
 import org.apache.doris.spark.listener.DorisTransactionListener
 import org.apache.doris.spark.load.{CachedDorisStreamLoadClient, DorisStreamLoad}
+import org.apache.doris.spark.etl.{BucketPartitioner, DppUtils, SparkDppUtils}
+import org.apache.doris.spark.rest.RestService
 import org.apache.doris.spark.sql.Utils
 import org.apache.spark.sql.DataFrame
 import org.slf4j.{Logger, LoggerFactory}
 
 import java.io.IOException
 import java.time.Duration
-import java.util
+import java.{lang, util}
 import java.util.Objects
 import scala.collection.JavaConverters._
+import scala.collection.convert.ImplicitConversions.`iterator asScala`
 import scala.collection.mutable
 import scala.util.{Failure, Success}
 
 class DorisWriter(settings: SparkSettings) extends Serializable {
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[DorisWriter])
+  val COMMIT_INTERVAL_MILLIS = 10;
 
   val batchSize: Int = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BATCH_SIZE,
     ConfigurationOptions.SINK_BATCH_SIZE_DEFAULT)
@@ -58,6 +62,12 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
   private val enable2PC: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_ENABLE_2PC,
     ConfigurationOptions.DORIS_SINK_ENABLE_2PC_DEFAULT);
 
+  private val enableBucketRepartition: lang.Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION,
+    ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION_DEFAULT)
+
+  private val bucketsNum: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BUCKET_NUM,
+    ConfigurationOptions.DORIS_SINK_BUCKET_NUM_DEFAULT)
+
   private val dorisStreamLoader: DorisStreamLoad = CachedDorisStreamLoadClient.getOrCreate(settings)
 
   def write(dataFrame: DataFrame): Unit = {
@@ -69,18 +79,30 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
       sc.addSparkListener(new DorisTransactionListener(preCommittedTxnAcc, dorisStreamLoader))
     }
 
-    var resultRdd = dataFrame.rdd
     val dfColumns = dataFrame.columns
-    if (Objects.nonNull(sinkTaskPartitionSize)) {
-      resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
+    var resultRdd = dataFrame.rdd
+
+    if (enableBucketRepartition) {
+      val etlSchema = RestService.getEtlSchema(settings, logger)
+      SparkDppUtils.repartitionByBuckets(dataFrame, etlSchema.partitionInfo, etlSchema.columns, bucketsNum)
+        .map(_.toSeq.map(_.asInstanceOf[AnyRef]).toList.asJava)
+        .foreachPartition(partition => {
+          partition
+            .grouped(batchSize)
+            .foreach(batch => flush(batch, dfColumns))
+        })
+    } else {
+      if (Objects.nonNull(sinkTaskPartitionSize)) {
+        resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
+      }
+      resultRdd
+        .map(_.toSeq.map(_.asInstanceOf[AnyRef]).toList.asJava)
+        .foreachPartition(partition => {
+          partition
+            .grouped(batchSize)
+            .foreach(batch => flush(batch, dfColumns))
+        })
     }
-    resultRdd
-      .map(_.toSeq.map(_.asInstanceOf[AnyRef]).toList.asJava)
-      .foreachPartition(partition => {
-        partition
-          .grouped(batchSize)
-          .foreach(batch => flush(batch, dfColumns))
-      })
 
     /**
      * flush data to Doris and do retry when flush error
@@ -102,7 +124,7 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
             logger.info("load task failed, start aborting previously pre-committed transactions")
             val abortFailedTxnIds = mutable.Buffer[Int]()
             preCommittedTxnAcc.value.asScala.foreach(txnId => {
-              Utils.retry[Unit, Exception](3, Duration.ofSeconds(1), logger) {
+              Utils.retry[Unit, Exception](3, Duration.ofMillis(COMMIT_INTERVAL_MILLIS), logger) {
                 dorisStreamLoader.abort(txnId)
               } match {
                 case Success(_) =>

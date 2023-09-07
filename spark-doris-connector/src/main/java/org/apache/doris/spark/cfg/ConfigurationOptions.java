@@ -113,4 +113,11 @@ public interface ConfigurationOptions {
     String DORIS_SINK_ENABLE_2PC = "doris.sink.enable-2pc";
     boolean DORIS_SINK_ENABLE_2PC_DEFAULT = false;
 
+    String DORIS_SINK_BUCKET_REPARTITION = "doris.sink.bucket.repartition";
+
+    boolean DORIS_SINK_BUCKET_REPARTITION_DEFAULT = false;
+
+    String DORIS_SINK_BUCKET_NUM = "doris.sink.bucket.num";
+    int DORIS_SINK_BUCKET_NUM_DEFAULT = 0;
+
 }

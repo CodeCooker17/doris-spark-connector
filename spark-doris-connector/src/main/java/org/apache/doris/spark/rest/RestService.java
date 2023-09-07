@@ -59,6 +59,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.doris.spark.cfg.ConfigurationOptions;
 import org.apache.doris.spark.cfg.Settings;
 import org.apache.doris.spark.cfg.SparkSettings;
+import org.apache.doris.spark.etl.EtlSchema;
 import org.apache.doris.spark.exception.ConnectedFailedException;
 import org.apache.doris.spark.exception.DorisException;
 import org.apache.doris.spark.exception.IllegalArgumentException;
@@ -69,6 +70,7 @@ import org.apache.doris.spark.rest.models.BackendV2;
 import org.apache.doris.spark.rest.models.QueryPlan;
 import org.apache.doris.spark.rest.models.Schema;
 import org.apache.doris.spark.rest.models.Tablet;
+
 import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
@@ -86,6 +88,10 @@ public class RestService implements Serializable {
     public final static int REST_RESPONSE_STATUS_OK = 200;
     private static final String API_PREFIX = "/api";
     private static final String SCHEMA = "_schema";
+
+    private static final String ETL_SCHEMA = "_etl_schema";
+
+
     private static final String QUERY_PLAN = "_query_plan";
     @Deprecated
     private static final String BACKENDS = "/rest/v1/system?path=//backends";
@@ -273,6 +279,133 @@ public class RestService implements Serializable {
                 "/";
     }
 
+    public static EtlSchema getEtlSchema(Settings cfg, Logger logger) throws DorisException {
+        List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
+        for (String feNode: feNodeList) {
+            try {
+                HttpGet httpGet = new HttpGet(getUriStr(feNode, cfg, logger) + ETL_SCHEMA);
+                String response = send(cfg, httpGet, logger);
+                logger.info("Find etlSchema response is '{}'.", response);
+                return parseEtlSchema(response, logger);
+            } catch (ConnectedFailedException e) {
+                logger.info("Doris FE node {} is unavailable: {}, Request the next Doris FE node", feNode, e.getMessage());
+            }
+        }
+        String errMsg = "No Doris FE is available, please check configuration";
+        logger.error(errMsg);
+        throw new DorisException(errMsg);
+    }
+    @VisibleForTesting
+    public static EtlSchema parseEtlSchema(String response, Logger logger) throws DorisException {
+        logger.trace("Parse response '{}' to etlPartitionInfo.", response);
+        ObjectMapper mapper = new ObjectMapper();
+        EtlSchema etlSchema;
+        try {
+
+            etlSchema = mapper.readValue(response, EtlSchema.class);
+        } catch (JsonParseException e) {
+            String errMsg = "Doris FE's response is not a json. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        } catch (JsonMappingException e) {
+            String errMsg = "Doris FE's response cannot map to etlPartitionInfo. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        } catch (IOException e) {
+            String errMsg = "Parse Doris FE's response to json failed. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        }
+
+        logger.debug("Parsing EtlSchema result is '{}'.", etlSchema);
+        return etlSchema;
+    }
+    //
+    // public static EtlPartitionInfo getEtlPartitionInfo(Settings cfg, Logger logger) throws DorisException {
+    //
+    //     List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
+    //     for (String feNode: feNodeList) {
+    //         try {
+    //             HttpGet httpGet = new HttpGet(getUriStr(feNode, cfg, logger) + ETL_PARTITIONS);
+    //             String response = send(cfg, httpGet, logger);
+    //             logger.debug("Find schema response is '{}'.", response);
+    //             return parseEtlPartitionInfo(response, logger);
+    //         } catch (ConnectedFailedException e) {
+    //             logger.info("Doris FE node {} is unavailable: {}, Request the next Doris FE node", feNode, e.getMessage());
+    //         }
+    //     }
+    //     String errMsg = "No Doris FE is available, please check configuration";
+    //     logger.error(errMsg);
+    //     throw new DorisException(errMsg);
+    // }
+    //
+    // @VisibleForTesting
+    // public static EtlPartitionInfo parseEtlPartitionInfo(String response, Logger logger) throws DorisException {
+    //     logger.trace("Parse response '{}' to etlPartitionInfo.", response);
+    //     ObjectMapper mapper = new ObjectMapper();
+    //     EtlPartitionInfo etlPartitionInfo;
+    //     try {
+    //
+    //         etlPartitionInfo = mapper.readValue(response, EtlPartitionInfo.class);
+    //     } catch (JsonParseException e) {
+    //         String errMsg = "Doris FE's response is not a json. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     } catch (JsonMappingException e) {
+    //         String errMsg = "Doris FE's response cannot map to etlPartitionInfo. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     } catch (IOException e) {
+    //         String errMsg = "Parse Doris FE's response to json failed. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     }
+    //
+    //     logger.debug("Parsing etlPartitionInfo result is '{}'.", etlPartitionInfo);
+    //     return etlPartitionInfo;
+    // }
+    //
+    // public static List<EtlColumn> getEtlColumns(Settings cfg, Logger logger) throws DorisException {
+    //     List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
+    //     for (String feNode: feNodeList) {
+    //         try {
+    //             HttpGet httpGet = new HttpGet(getUriStr(feNode, cfg, logger) + ETL_COLUMNS);
+    //             String response = send(cfg, httpGet, logger);
+    //             logger.debug("Find schema response is '{}'.", response);
+    //             return parseEtlColumns(response, logger);
+    //         } catch (ConnectedFailedException e) {
+    //             logger.info("Doris FE node {} is unavailable: {}, Request the next Doris FE node", feNode, e.getMessage());
+    //         }
+    //     }
+    //     String errMsg = "No Doris FE is available, please check configuration";
+    //     logger.error(errMsg);
+    //     throw new DorisException(errMsg);
+    // }
+    //
+    // @VisibleForTesting
+    // public static List<EtlColumn> parseEtlColumns(String response, Logger logger) throws DorisException {
+    //     logger.trace("Parse response '{}' to etlPartitionInfo.", response);
+    //     ObjectMapper mapper = new ObjectMapper();
+    //     List<EtlColumn> etlColumns;
+    //     try {
+    //         etlColumns = mapper.readValue(response, List.class);
+    //     } catch (JsonParseException e) {
+    //         String errMsg = "Doris FE's response is not a json. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     } catch (JsonMappingException e) {
+    //         String errMsg = "Doris FE's response cannot map to etlPartitionInfo. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     } catch (IOException e) {
+    //         String errMsg = "Parse Doris FE's response to json failed. res: " + response;
+    //         logger.error(errMsg, e);
+    //         throw new DorisException(errMsg, e);
+    //     }
+    //
+    //     logger.debug("Parsing EtlColumns result is '{}'.", etlColumns);
+    //     return etlColumns;
+    // }
 
     /**
      * discover Doris table schema from Doris FE.
@@ -287,7 +420,7 @@ public class RestService implements Serializable {
         List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
         for (String feNode: feNodeList) {
             try {
-                HttpGet httpGet = new HttpGet(getUriStr(feNode,cfg, logger) + SCHEMA);
+                HttpGet httpGet = new HttpGet(getUriStr(feNode, cfg, logger) + SCHEMA);
                 String response = send(cfg, httpGet, logger);
                 logger.debug("Find schema response is '{}'.", response);
                 return parseSchema(response, logger);

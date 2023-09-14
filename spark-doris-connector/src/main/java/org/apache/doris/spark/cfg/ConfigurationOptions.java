@@ -106,4 +106,11 @@ public interface ConfigurationOptions {
     String DORIS_SINK_STREAMING_PASSTHROUGH = "doris.sink.streaming.passthrough";
     boolean DORIS_SINK_STREAMING_PASSTHROUGH_DEFAULT = false;
 
+    String DORIS_SINK_BUCKET_REPARTITION = "doris.sink.bucket.repartition";
+
+    boolean DORIS_SINK_BUCKET_REPARTITION_DEFAULT = false;
+
+    String DORIS_SINK_BUCKET_NUM = "doris.sink.bucket.num";
+    int DORIS_SINK_BUCKET_NUM_DEFAULT = 0;
+
 }

@@ -146,7 +146,6 @@ private[spark] object SchemaUtils {
   }
 
   def rowColumnValue(row: SpecializedGetters, ordinal: Int, dataType: DataType): Any = {
-
     dataType match {
       case NullType => DataUtil.NULL_VALUE
       case BooleanType => row.getBoolean(ordinal)
@@ -156,7 +155,8 @@ private[spark] object SchemaUtils {
       case LongType => row.getLong(ordinal)
       case FloatType => row.getFloat(ordinal)
       case DoubleType => row.getDouble(ordinal)
-      case StringType => row.getUTF8String(ordinal).toString
+      case StringType =>
+        Option(row.getUTF8String(ordinal)).map(_.toString).getOrElse(DataUtil.NULL_VALUE)
       case TimestampType =>
         LocalDateTime.ofEpochSecond(row.getLong(ordinal) / 100000, (row.getLong(ordinal) % 1000).toInt, ZoneOffset.UTC)
         new Timestamp(row.getLong(ordinal) / 1000).toString

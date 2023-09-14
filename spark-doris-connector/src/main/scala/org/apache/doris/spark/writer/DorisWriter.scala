@@ -18,11 +18,14 @@
 package org.apache.doris.spark.writer
 
 import org.apache.doris.spark.cfg.{ConfigurationOptions, SparkSettings}
+import org.apache.doris.spark.etl.SparkDppUtils
 import org.apache.doris.spark.listener.DorisTransactionListener
 import org.apache.doris.spark.load.{CachedDorisStreamLoadClient, DorisStreamLoad}
+import org.apache.doris.spark.rest.RestService
 import org.apache.doris.spark.sql.Utils
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, Dataset}
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.CollectionAccumulator
 import org.slf4j.{Logger, LoggerFactory}
@@ -50,6 +53,12 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
   private val enable2PC: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_ENABLE_2PC,
     ConfigurationOptions.DORIS_SINK_ENABLE_2PC_DEFAULT);
 
+  private val enableBucketRepartition: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION,
+    ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION_DEFAULT)
+
+  private val bucketsNum: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BUCKET_NUM,
+    ConfigurationOptions.DORIS_SINK_BUCKET_NUM_DEFAULT)
+
   private val dorisStreamLoader: DorisStreamLoad = CachedDorisStreamLoadClient.getOrCreate(settings)
 
   def write(dataFrame: DataFrame): Unit = {
@@ -69,26 +78,48 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     if (enable2PC) {
       sc.addSparkListener(new DorisTransactionListener(preCommittedTxnAcc, dorisStreamLoader))
     }
-
     var resultRdd = dataFrame.queryExecution.toRdd
     val schema = dataFrame.schema
-    if (Objects.nonNull(sinkTaskPartitionSize)) {
-      resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
-    }
-    resultRdd.foreachPartition(iterator => {
-      while (iterator.hasNext) {
-        // do load batch with retries
-        Utils.retry[Int, Exception](maxRetryTimes, Duration.ofMillis(batchInterValMs.toLong), logger) {
-          loadFunc(iterator.asJava, schema)
-        } match {
-          case Success(txnId) => if (enable2PC) handleLoadSuccess(txnId, preCommittedTxnAcc)
-          case Failure(e) =>
-            if (enable2PC) handleLoadFailure(preCommittedTxnAcc)
-            throw new IOException(
-              s"Failed to load batch data on BE: ${dorisStreamLoader.getLoadUrlStr} node and exceeded the max ${maxRetryTimes} retry times.", e)
+
+    RowEncoder
+    if (enableBucketRepartition) {
+      val etlSchema = RestService.getEtlSchema(settings, logger)
+      SparkDppUtils.repartitionByBuckets(dataFrame.queryExecution, etlSchema.partitionInfo, etlSchema.columns, bucketsNum, schema)
+        .foreachPartition(
+        iterator => {
+          while (iterator.hasNext) {
+            // do load batch with retries
+            Utils.retry[Int, Exception](maxRetryTimes, Duration.ofMillis(batchInterValMs.toLong), logger) {
+              loadFunc(iterator, schema)
+            } match {
+              case Success(txnId) => if (enable2PC) handleLoadSuccess(txnId, preCommittedTxnAcc)
+              case Failure(e) =>
+                if (enable2PC) handleLoadFailure(preCommittedTxnAcc)
+                throw new IOException(
+                  s"Failed to load batch data on BE: ${dorisStreamLoader.getLoadUrlStr} node and exceeded the max ${maxRetryTimes} retry times.", e)
+            }
+          }
         }
+      )
+    } else {
+      if (Objects.nonNull(sinkTaskPartitionSize)) {
+        resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
       }
-    })
+      resultRdd.foreachPartition(iterator => {
+        while (iterator.hasNext) {
+          // do load batch with retries
+          Utils.retry[Int, Exception](maxRetryTimes, Duration.ofMillis(batchInterValMs.toLong), logger) {
+            loadFunc(iterator.asJava, schema)
+          } match {
+            case Success(txnId) => if (enable2PC) handleLoadSuccess(txnId, preCommittedTxnAcc)
+            case Failure(e) =>
+              if (enable2PC) handleLoadFailure(preCommittedTxnAcc)
+              throw new IOException(
+                s"Failed to load batch data on BE: ${dorisStreamLoader.getLoadUrlStr} node and exceeded the max ${maxRetryTimes} retry times.", e)
+          }
+        }
+      })
+    }
 
   }
 

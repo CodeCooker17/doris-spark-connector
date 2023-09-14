@@ -59,6 +59,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.doris.spark.cfg.ConfigurationOptions;
 import org.apache.doris.spark.cfg.Settings;
 import org.apache.doris.spark.cfg.SparkSettings;
+import org.apache.doris.spark.etl.EtlSchema;
 import org.apache.doris.spark.exception.ConnectedFailedException;
 import org.apache.doris.spark.exception.DorisException;
 import org.apache.doris.spark.exception.IllegalArgumentException;
@@ -87,6 +88,9 @@ public class RestService implements Serializable {
     private static final String API_PREFIX = "/api";
     private static final String SCHEMA = "_schema";
     private static final String QUERY_PLAN = "_query_plan";
+
+    private static final String ETL_SCHEMA = "_etl_schema";
+
     @Deprecated
     private static final String BACKENDS = "/rest/v1/system?path=//backends";
     private static final String BACKENDS_V2 = "/api/backends?is_alive=true";
@@ -301,6 +305,56 @@ public class RestService implements Serializable {
     }
 
     /**
+     * find Doris RDD EtlSchema from Doris FE.
+     * @param cfg configuration of request
+     * @param logger {@link Logger}
+     * @return table EtlSchema
+     * @throws DorisException throw when find EtlSchema failed
+     */
+    public static EtlSchema getEtlSchema(Settings cfg, Logger logger) throws DorisException {
+        List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
+        for (String feNode: feNodeList) {
+            try {
+                HttpGet httpGet = new HttpGet(getUriStr(feNode, cfg, logger) + ETL_SCHEMA);
+                String response = send(cfg, httpGet, logger);
+                logger.info("Find etlSchema response is '{}'.", response);
+                return parseEtlSchema(response, logger);
+            } catch (ConnectedFailedException e) {
+                logger.info("Doris FE node {} is unavailable: {}, Request the next Doris FE node", feNode, e.getMessage());
+            }
+        }
+        String errMsg = "No Doris FE is available, please check configuration";
+        logger.error(errMsg);
+        throw new DorisException(errMsg);
+    }
+
+    @VisibleForTesting
+    public static EtlSchema parseEtlSchema(String response, Logger logger) throws DorisException {
+        logger.trace("Parse response '{}' to etlPartitionInfo.", response);
+        ObjectMapper mapper = new ObjectMapper();
+        EtlSchema etlSchema;
+        try {
+
+            etlSchema = mapper.readValue(response, EtlSchema.class);
+        } catch (JsonParseException e) {
+            String errMsg = "Doris FE's response is not a json. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        } catch (JsonMappingException e) {
+            String errMsg = "Doris FE's response cannot map to etlPartitionInfo. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        } catch (IOException e) {
+            String errMsg = "Parse Doris FE's response to json failed. res: " + response;
+            logger.error(errMsg, e);
+            throw new DorisException(errMsg, e);
+        }
+
+        logger.debug("Parsing EtlSchema result is '{}'.", etlSchema);
+        return etlSchema;
+    }
+
+    /**
      * translate Doris FE response to inner {@link Schema} struct.
      * @param response Doris FE response
      * @param logger {@link Logger}
@@ -361,7 +415,7 @@ public class RestService implements Serializable {
         List<String> feNodeList = allEndpoints(cfg.getProperty(DORIS_FENODES), logger);
         for (String feNode: feNodeList) {
             try {
-                HttpPost httpPost = new HttpPost(getUriStr(feNode,cfg, logger) + QUERY_PLAN);
+                HttpPost httpPost = new HttpPost(getUriStr(feNode, cfg, logger) + QUERY_PLAN);
                 String entity = "{\"sql\": \""+ sql +"\"}";
                 logger.debug("Post body Sending to Doris FE is: '{}'.", entity);
                 StringEntity stringEntity = new StringEntity(entity, StandardCharsets.UTF_8);

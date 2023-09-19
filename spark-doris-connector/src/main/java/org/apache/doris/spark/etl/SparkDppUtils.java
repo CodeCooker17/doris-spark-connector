@@ -197,7 +197,7 @@ public class SparkDppUtils {
                         String columnName = keyAndPartitionColumnNames.get(i);
                         int columnIndex = dstTableSchema.fieldIndex(columnName);
                         if(columnIndex == -1){
-                            throw new DorisException("hash value can not find column.");
+                            throw new DorisException("hash value can not find column index.");
                         }
                         Object columnObject = row.get(columnIndex, fields[columnIndex].dataType());
                         keyAndPartitionColumns.add(columnObject);

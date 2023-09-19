@@ -19,24 +19,20 @@ package org.apache.doris.spark.etl;
 
 import org.apache.doris.spark.exception.DorisException;
 
-import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.DecimalType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.zip.CRC32;
 
 public class DppUtils {
-    public static final String BUCKET_ID = "__bucketId__";
 
     public static Class getClassFromColumn(EtlColumn column) throws Exception {
         switch (column.columnType) {
@@ -77,64 +73,6 @@ public class DppUtils {
             default:
                 return String.class;
         }
-    }
-
-    public static DataType getDataTypeFromColumn(EtlColumn column, boolean regardDistinctColumnAsBinary) {
-        DataType dataType = DataTypes.StringType;
-        switch (column.columnType) {
-            case "BOOLEAN":
-                dataType = DataTypes.StringType;
-                break;
-            case "TINYINT":
-                dataType = DataTypes.ByteType;
-                break;
-            case "SMALLINT":
-                dataType = DataTypes.ShortType;
-                break;
-            case "INT":
-                dataType = DataTypes.IntegerType;
-                break;
-            case "DATETIME":
-            case "DATETIMEV2":
-                dataType = DataTypes.TimestampType;
-                break;
-            case "BIGINT":
-                dataType = DataTypes.LongType;
-                break;
-            case "LARGEINT":
-                dataType = DataTypes.StringType;
-                break;
-            case "FLOAT":
-                dataType = DataTypes.FloatType;
-                break;
-            case "DOUBLE":
-                dataType = DataTypes.DoubleType;
-                break;
-            case "DATE":
-            case "DATEV2":
-                dataType = DataTypes.DateType;
-                break;
-            case "CHAR":
-            case "VARCHAR":
-            case "STRING":
-            case "TEXT":
-            case "OBJECT":
-                dataType = DataTypes.StringType;
-                break;
-            case "HLL":
-            case "BITMAP":
-                dataType = regardDistinctColumnAsBinary ? DataTypes.BinaryType : DataTypes.StringType;
-                break;
-            case "DECIMALV2":
-            case "DECIMAL32":
-            case "DECIMAL64":
-            case "DECIMAL128":
-                dataType = DecimalType.apply(column.precision, column.scale);
-                break;
-            default:
-                dataType = DataTypes.StringType;
-        }
-        return dataType;
     }
 
     public static ByteBuffer getHashValue(Object o, DataType type) {
@@ -185,22 +123,6 @@ public class DppUtils {
             hashValue.update(buffer.array(), 0, buffer.limit());
         }
         return hashValue.getValue();
-    }
-
-    public static StructType createDstTableSchema(List<EtlColumn> columns,
-            boolean addBucketIdColumn, boolean regardDistinctColumnAsBinary) {
-        List<StructField> fields = new ArrayList<>();
-        if (addBucketIdColumn) {
-            StructField bucketIdField = DataTypes.createStructField(BUCKET_ID, DataTypes.StringType, true);
-            fields.add(bucketIdField);
-        }
-        for (EtlColumn column : columns) {
-            DataType structColumnType = getDataTypeFromColumn(column, regardDistinctColumnAsBinary);
-            StructField field = DataTypes.createStructField(column.columnName, structColumnType, column.isAllowNull);
-            fields.add(field);
-        }
-        StructType dstSchema = DataTypes.createStructType(fields);
-        return dstSchema;
     }
 
 }

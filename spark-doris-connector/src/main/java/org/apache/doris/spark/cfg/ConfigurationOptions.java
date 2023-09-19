@@ -128,4 +128,11 @@ public interface ConfigurationOptions {
     String DORIS_SINK_TXN_RETRIES = "doris.sink.txn.retries";
     int DORIS_SINK_TXN_RETRIES_DEFAULT = 3;
 
+    String DORIS_SINK_BUCKET_REPARTITION = "doris.sink.bucket.repartition";
+
+    boolean DORIS_SINK_BUCKET_REPARTITION_DEFAULT = false;
+
+    String DORIS_SINK_BUCKET_NUM = "doris.sink.bucket.num";
+    int DORIS_SINK_BUCKET_NUM_DEFAULT = 0;
+
 }

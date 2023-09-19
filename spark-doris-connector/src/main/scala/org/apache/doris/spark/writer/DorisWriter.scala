@@ -18,8 +18,10 @@
 package org.apache.doris.spark.writer
 
 import org.apache.doris.spark.cfg.{ConfigurationOptions, SparkSettings}
+import org.apache.doris.spark.etl.SparkDppUtils
 import org.apache.doris.spark.listener.DorisTransactionListener
 import org.apache.doris.spark.load.{CachedDorisStreamLoadClient, DorisStreamLoad}
+import org.apache.doris.spark.rest.RestService
 import org.apache.doris.spark.sql.Utils
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.catalyst.InternalRow
@@ -63,6 +65,12 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
   private val sinkTxnRetries: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_TXN_RETRIES,
     ConfigurationOptions.DORIS_SINK_TXN_RETRIES_DEFAULT)
 
+  private val enableBucketRepartition: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION,
+    ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION_DEFAULT)
+
+  private val bucketsNum: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BUCKET_NUM,
+    ConfigurationOptions.DORIS_SINK_BUCKET_NUM_DEFAULT)
+
   private val dorisStreamLoader: DorisStreamLoad = CachedDorisStreamLoadClient.getOrCreate(settings)
 
   def write(dataFrame: DataFrame): Unit = {
@@ -85,15 +93,12 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
 
     var resultRdd = dataFrame.queryExecution.toRdd
     val schema = dataFrame.schema
-    val dfColumns = dataFrame.columns
-    if (Objects.nonNull(sinkTaskPartitionSize)) {
-      resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
-    }
-    resultRdd.foreachPartition(iterator => {
+
+    def processPartition(iterator: util.Iterator[InternalRow]): Unit = {
       while (iterator.hasNext) {
         // do load batch with retries
         Utils.retry[Int, Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong), Duration.ofMillis(maxBlockInterValMs.toLong), blockTriggerKeysArray, logger) {
-          loadFunc(iterator.asJava, schema)
+          loadFunc(iterator, schema)
         } match {
           case Success(txnId) => if (enable2PC) handleLoadSuccess(txnId, preCommittedTxnAcc)
           case Failure(e) =>
@@ -102,7 +107,21 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
               s"Failed to load batch data on BE: ${dorisStreamLoader.getLoadUrlStr} node and exceeded the max ${maxRetryTimes} retry times.", e)
         }
       }
-    })
+    }
+
+    if (enableBucketRepartition) {
+      logger.info("start repartition.")
+      val etlSchema = RestService.getEtlSchema(settings, logger)
+      SparkDppUtils.repartitionByBuckets(dataFrame.queryExecution, etlSchema.partitionInfo, etlSchema.columns, bucketsNum, schema)
+        .foreachPartition(iterator => {processPartition(iterator)})
+    } else {
+      if (Objects.nonNull(sinkTaskPartitionSize)) {
+        resultRdd = if (sinkTaskUseRepartition) resultRdd.repartition(sinkTaskPartitionSize) else resultRdd.coalesce(sinkTaskPartitionSize)
+      }
+      resultRdd.foreachPartition(
+        iterator => {processPartition(iterator.asJava)}
+      )
+    }
 
   }
 

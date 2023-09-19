@@ -90,6 +90,16 @@ public interface ConfigurationOptions {
 
     int DORIS_SINK_BATCH_INTERVAL_MS_DEFAULT = 50;
 
+    String DORIS_SINK_MAX_BLOCKING_TIMES = "doris.sink.max.blocking.times";
+    int SINK_MAX_BLOCKING_TIMES_DEFAULT = 1;
+
+    String DORIS_SINK_MAX_BLOCKING_INTERVAL_MS = "doris.sink.max.blocking.interval.ms";
+    int SINK_MAX_BLOCKING_INTERVAL_MS_DEFAULT = 300000;
+
+    String DORIS_SINK_BLOCKING_TRIGGER_KEYS = "doris.sink.block.trigger.keys";
+    String SINK_BLOCKING_TRIGGER_KEYS_DEFAULT = "";
+
+
     /**
      * set types to ignore, split by comma
      * e.g.
@@ -105,6 +115,18 @@ public interface ConfigurationOptions {
      */
     String DORIS_SINK_STREAMING_PASSTHROUGH = "doris.sink.streaming.passthrough";
     boolean DORIS_SINK_STREAMING_PASSTHROUGH_DEFAULT = false;
+
+    /**
+     * txnId commit or abort interval
+     */
+    String DORIS_SINK_TXN_INTERVAL_MS = "doris.sink.txn.interval.ms";
+    int DORIS_SINK_TXN_INTERVAL_MS_DEFAULT = 50;
+
+    /**
+     * txnId commit or abort retry times
+     */
+    String DORIS_SINK_TXN_RETRIES = "doris.sink.txn.retries";
+    int DORIS_SINK_TXN_RETRIES_DEFAULT = 3;
 
     String DORIS_SINK_BUCKET_REPARTITION = "doris.sink.bucket.repartition";
 

@@ -41,6 +41,8 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
 
   private val logger: Logger = LoggerFactory.getLogger(classOf[DorisWriter])
 
+  val batchSize: Int = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BATCH_SIZE,
+    ConfigurationOptions.SINK_BATCH_SIZE_DEFAULT)
   private val maxRetryTimes: Int = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_MAX_RETRIES,
     ConfigurationOptions.SINK_MAX_RETRIES_DEFAULT)
   private val sinkTaskPartitionSize: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_TASK_PARTITION_SIZE)
@@ -48,9 +50,20 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     ConfigurationOptions.DORIS_SINK_TASK_USE_REPARTITION_DEFAULT.toString).toBoolean
   private val batchInterValMs: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_BATCH_INTERVAL_MS,
     ConfigurationOptions.DORIS_SINK_BATCH_INTERVAL_MS_DEFAULT)
+  private val maxSinkBlocks: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_MAX_BLOCKING_TIMES,
+    ConfigurationOptions.SINK_MAX_BLOCKING_TIMES_DEFAULT)
+  private val blockTriggerKeys: String = settings.getProperty(ConfigurationOptions.DORIS_SINK_BLOCKING_TRIGGER_KEYS,
+    ConfigurationOptions.SINK_BLOCKING_TRIGGER_KEYS_DEFAULT)
+  private val maxBlockInterValMs: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_MAX_BLOCKING_INTERVAL_MS,
+    ConfigurationOptions.SINK_MAX_BLOCKING_INTERVAL_MS_DEFAULT)
+  private val blockTriggerKeysArray: Array[String] = blockTriggerKeys.split(",")
 
   private val enable2PC: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_ENABLE_2PC,
     ConfigurationOptions.DORIS_SINK_ENABLE_2PC_DEFAULT);
+  private val sinkTxnIntervalMs: Int = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_TXN_INTERVAL_MS,
+    ConfigurationOptions.DORIS_SINK_TXN_INTERVAL_MS_DEFAULT)
+  private val sinkTxnRetries: Integer = settings.getIntegerProperty(ConfigurationOptions.DORIS_SINK_TXN_RETRIES,
+    ConfigurationOptions.DORIS_SINK_TXN_RETRIES_DEFAULT)
 
   private val enableBucketRepartition: Boolean = settings.getBooleanProperty(ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION,
     ConfigurationOptions.DORIS_SINK_BUCKET_REPARTITION_DEFAULT)
@@ -70,18 +83,21 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
 
   private def doWrite(dataFrame: DataFrame, loadFunc: (util.Iterator[InternalRow], StructType) => Int): Unit = {
 
+
+
     val sc = dataFrame.sqlContext.sparkContext
     val preCommittedTxnAcc = sc.collectionAccumulator[Int]("preCommittedTxnAcc")
     if (enable2PC) {
-      sc.addSparkListener(new DorisTransactionListener(preCommittedTxnAcc, dorisStreamLoader))
+      sc.addSparkListener(new DorisTransactionListener(preCommittedTxnAcc, dorisStreamLoader, sinkTxnIntervalMs, sinkTxnRetries))
     }
+
     var resultRdd = dataFrame.queryExecution.toRdd
     val schema = dataFrame.schema
 
     def processPartition(iterator: util.Iterator[InternalRow]): Unit = {
       while (iterator.hasNext) {
         // do load batch with retries
-        Utils.retry[Int, Exception](maxRetryTimes, Duration.ofMillis(batchInterValMs.toLong), logger) {
+        Utils.retry[Int, Exception](maxRetryTimes, maxSinkBlocks, Duration.ofMillis(batchInterValMs.toLong), Duration.ofMillis(maxBlockInterValMs.toLong), blockTriggerKeysArray, logger) {
           loadFunc(iterator, schema)
         } match {
           case Success(txnId) => if (enable2PC) handleLoadSuccess(txnId, preCommittedTxnAcc)
@@ -123,7 +139,7 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     }
     val abortFailedTxnIds = mutable.Buffer[Int]()
     acc.value.asScala.foreach(txnId => {
-      Utils.retry[Unit, Exception](3, Duration.ofSeconds(1), logger) {
+      Utils.retry[Unit, Exception](sinkTxnRetries, Duration.ofMillis(sinkTxnIntervalMs), logger) {
         dorisStreamLoader.abort(txnId)
       } match {
         case Success(_) =>
@@ -133,5 +149,6 @@ class DorisWriter(settings: SparkSettings) extends Serializable {
     if (abortFailedTxnIds.nonEmpty) logger.warn("not aborted txn ids: {}", abortFailedTxnIds.mkString(","))
     acc.reset()
   }
+
 
 }

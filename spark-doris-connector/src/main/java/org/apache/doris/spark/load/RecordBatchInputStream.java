@@ -54,9 +54,9 @@ public class RecordBatchInputStream extends InputStream {
      * record buffer
      */
 
-    private ByteBuffer lineBuf;
+    private ByteBuffer lineBuf = ByteBuffer.allocate(0);;
 
-    private ByteBuffer deliBuf;
+    private ByteBuffer deliBuf = ByteBuffer.allocate(0);
 
     private final byte[] delim;
 
@@ -79,13 +79,13 @@ public class RecordBatchInputStream extends InputStream {
     @Override
     public int read() throws IOException {
         try {
-            if (deliBuf != null && deliBuf.remaining() > 0) {
-                return deliBuf.get() & 0xff;
-            }
             if (lineBuf.remaining() == 0 && endOfBatch()) {
                 return -1;
             }
 
+            if (deliBuf != null && deliBuf.remaining() > 0) {
+                return deliBuf.get() & 0xff;
+            }
         } catch (DorisException e) {
             throw new IOException(e);
         }
@@ -95,15 +95,16 @@ public class RecordBatchInputStream extends InputStream {
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
         try {
+            if (lineBuf.remaining() == 0 && endOfBatch()) {
+                return -1;
+            }
+
             if (deliBuf != null && deliBuf.remaining() > 0) {
                 int bytesRead = Math.min(len, deliBuf.remaining());
                 deliBuf.get(b, off, bytesRead);
                 return bytesRead;
             }
 
-            if (lineBuf.remaining() == 0 && endOfBatch()) {
-                return -1;
-            }
         } catch (DorisException e) {
             throw new IOException(e);
         }
@@ -123,6 +124,7 @@ public class RecordBatchInputStream extends InputStream {
     public boolean endOfBatch() throws DorisException {
         Iterator<InternalRow> iterator = recordBatch.getIterator();
         if (readCount >= recordBatch.getBatchSize() || !iterator.hasNext()) {
+            deliBuf = null;
             return true;
         }
         readNext(iterator);
@@ -189,6 +191,5 @@ public class RecordBatchInputStream extends InputStream {
         return bytes;
 
     }
-
 
 }

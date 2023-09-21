@@ -102,6 +102,24 @@ class DppColumns implements Comparable<DppColumns>, Serializable {
         return true;
     }
 
+    public boolean contains(Object o){
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        DppColumns dppColumns = (DppColumns) o;
+        for (int i = 0; i < columns.size(); i++) {
+
+            if (columns.get(i).equals(dppColumns.columns)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public int hashCode() {
         return Objects.hash(columns);

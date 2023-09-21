@@ -23,8 +23,8 @@ import java.io.Serializable;
 import java.util.List;
 
 public class DorisRangePartitioner extends Partitioner {
-    private static final String UNPARTITIONED_TYPE = "UNPARTITIONED";
-    private static final String LIST_TYPE = "LIST";
+    public static final String UNPARTITIONED_TYPE = "UNPARTITIONED";
+    public static final String LIST_TYPE = "LIST";
     private EtlPartitionInfo partitionInfo;
     private List<PartitionRangeKey> partitionRangeKeys;
     List<Integer> partitionKeyIndexes;
@@ -53,10 +53,9 @@ public class DorisRangePartitioner extends Partitioner {
             return 0;
         } else if (partitionInfo.partitionType != null
                 && partitionInfo.partitionType.equalsIgnoreCase(LIST_TYPE)) {
-            DppColumns key = (DppColumns) var1;
-            DppColumns partitionKey = new DppColumns(key, partitionKeyIndexes);
+            DppColumns partitionKey = (DppColumns) var1;
             for (int i = 0; i < partitionRangeKeys.size(); i++) {
-                if (partitionKey.equals(partitionRangeKeys.get(i).startKeys)) {
+                if (partitionRangeKeys.get(i).startKeys.contains(partitionKey)) {
                     return i;
                 }
             }

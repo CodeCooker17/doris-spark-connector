@@ -19,13 +19,16 @@ package org.apache.doris.spark.etl;
 
 import org.apache.doris.spark.etl.EtlPartitionInfo.EtlPartition;
 import org.apache.doris.spark.exception.DorisException;
+import org.apache.doris.spark.sql.SchemaUtils;
 
 import com.esotericsoftware.minlog.Log;
+import static org.apache.doris.spark.etl.DorisRangePartitioner.LIST_TYPE;
 import org.apache.spark.Partitioner;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.execution.QueryExecution;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
@@ -51,7 +54,6 @@ public class SparkDppUtils {
         JavaPairRDD<String, InternalRow> result;
 
         List<String> keyAndPartitionColumnNames = new ArrayList<>();
-        List<String> valueColumnNames = new ArrayList<>();
 
         for (EtlColumn etlColumn : columns) {
             if (etlColumn.isKey) {
@@ -60,10 +62,8 @@ public class SparkDppUtils {
                 if (partitionInfo.partitionColumnRefs.contains(etlColumn.columnName)) {
                     keyAndPartitionColumnNames.add(etlColumn.columnName);
                 }
-                valueColumnNames.add(etlColumn.columnName);
             }
         }
-
 
         List<Integer> partitionKeyIndex = new ArrayList<>();
         List<Class> partitionKeySchema = new ArrayList<>();
@@ -101,22 +101,37 @@ public class SparkDppUtils {
         for (EtlPartition partition : partitionInfo.partitions) {
             DorisRangePartitioner.PartitionRangeKey partitionRangeKey = new DorisRangePartitioner.PartitionRangeKey();
             List<Object> startKeyColumns = new ArrayList<>();
-            for (int i = 0; i < partition.startKeys.size(); i++) {
-                Object value = partition.startKeys.get(i);
-                startKeyColumns.add(convertPartitionKey(value, partitionKeySchema.get(i)));
-            }
-            partitionRangeKey.startKeys = new DppColumns(startKeyColumns);
-            if (!partition.isMaxPartition) {
-                partitionRangeKey.isMaxPartition = false;
-                List<Object> endKeyColumns = new ArrayList<>();
-                for (int i = 0; i < partition.endKeys.size(); i++) {
-                    Object value = partition.endKeys.get(i);
-                    endKeyColumns.add(convertPartitionKey(value, partitionKeySchema.get(i)));
+            if (partitionInfo.partitionType.equalsIgnoreCase(LIST_TYPE)) {
+                int keySize = partition.startKeys.size();
+                int schemaSize = partitionKeySchema.size();
+                for (int i = 0; i < keySize / schemaSize; i++) {
+                    List<Object> keyList = new ArrayList();
+                    for (int j = 0; j < schemaSize; j++) {
+                        Object value = partition.startKeys.get(j + i * schemaSize);
+                        keyList.add(convertPartitionKey(value, partitionKeySchema.get(j)));
+                    }
+                    startKeyColumns.add(keyList);
                 }
-                partitionRangeKey.endKeys = new DppColumns(endKeyColumns);
+                partitionRangeKey.startKeys = new DppColumns(startKeyColumns);
             } else {
-                partitionRangeKey.isMaxPartition = true;
+                for (int i = 0; i < partition.startKeys.size(); i++) {
+                    Object value = partition.startKeys.get(i);
+                    startKeyColumns.add(convertPartitionKey(value, partitionKeySchema.get(i)));
+                }
+                partitionRangeKey.startKeys = new DppColumns(startKeyColumns);
+                if (!partition.isMaxPartition) {
+                    partitionRangeKey.isMaxPartition = false;
+                    List<Object> endKeyColumns = new ArrayList<>();
+                    for (int i = 0; i < partition.endKeys.size(); i++) {
+                        Object value = partition.endKeys.get(i);
+                        endKeyColumns.add(convertPartitionKey(value, partitionKeySchema.get(i)));
+                    }
+                    partitionRangeKey.endKeys = new DppColumns(endKeyColumns);
+                } else {
+                    partitionRangeKey.isMaxPartition = true;
+                }
             }
+
             partitionRangeKeys.add(partitionRangeKey);
         }
         return partitionRangeKeys;
@@ -126,21 +141,37 @@ public class SparkDppUtils {
         if (dstClass.equals(Float.class) || dstClass.equals(Double.class)) {
             return null;
         }
-        if (srcValue instanceof Double) {
+        if (srcValue instanceof Double || srcValue instanceof Integer) {
             if (dstClass.equals(Short.class)) {
-                return ((Double) srcValue).shortValue();
+                if (srcValue instanceof Double) {
+                    return ((Double) srcValue).shortValue();
+                } else {
+                    return ((Integer) srcValue).shortValue();
+                }
             } else if (dstClass.equals(Integer.class)) {
-                return ((Double) srcValue).intValue();
+                if (srcValue instanceof Double) {
+                    return ((Double) srcValue).intValue();
+                } else {
+                    return srcValue;
+                }
             } else if (dstClass.equals(Long.class)) {
-                return ((Double) srcValue).longValue();
+                if (srcValue instanceof Double) {
+                    return ((Double) srcValue).longValue();
+                } else {
+                    return ((Integer) srcValue).longValue();
+                }
             } else if (dstClass.equals(BigInteger.class)) {
                 // TODO(wb) gson will cast origin value to double by default
                 // when the partition column is largeint, this will cause error data
                 // need fix it thoroughly
                 return new BigInteger(srcValue.toString());
             } else if (dstClass.equals(java.sql.Date.class) || dstClass.equals(java.util.Date.class)) {
-                double srcValueDouble = (double) srcValue;
-                return convertToJavaDate((int) srcValueDouble);
+                if (srcValue instanceof Integer) {
+                    return convertToJavaDate((int) srcValue);
+                } else {
+                    double srcValueDouble = (double) srcValue;
+                    return convertToJavaDate((int) srcValueDouble);
+                }
             } else if (dstClass.equals(java.sql.Timestamp.class)) {
                 double srcValueDouble = (double) srcValue;
                 return convertToJavaDatetime((long) srcValueDouble);
@@ -148,6 +179,8 @@ public class SparkDppUtils {
                 // dst type is string
                 return srcValue.toString();
             }
+        } else if(srcValue instanceof String){
+            return srcValue.toString();
         } else {
             LOG.warn("unsupport partition key:" + srcValue);
             throw new DorisException("unsupport partition key:" + srcValue);
@@ -199,19 +232,22 @@ public class SparkDppUtils {
                         if(columnIndex == -1){
                             throw new DorisException("hash value can not find column index.");
                         }
-                        Object columnObject = row.get(columnIndex, fields[columnIndex].dataType());
+                        Object columnObject = SchemaUtils.rowColumnValue(row, columnIndex, fields[columnIndex].dataType());
                         keyAndPartitionColumns.add(columnObject);
                     }
                     DppColumns key = new DppColumns(keyAndPartitionColumns);
                     int pid = partitioner.getPartition(key);
+                    if (pid == -1) {
+                        throw new DorisException("can not find partition.");
+                    }
                     // TODO(wb) support lagreint for hash
                     long hashValue = DppUtils.getHashValue(row, distributeColumns, dstTableSchema);
                     int finalBucketNumber = getRepartitionSize(partitionInfo.partitions.get(pid).bucketNum, bucketsNum);
-                    int bucketId = (int) ((hashValue & 0xffffffff) % finalBucketNumber);
+                    int bucketId = (int) ((hashValue & 0xffffffffL) % finalBucketNumber);
                     long partitionId = partitionInfo.partitions.get(pid).partitionId;
                     // bucketKey is partitionId_bucketId
                     String bucketKey = partitionId + "_" + bucketId;
-                    result.add(new Tuple2<>(bucketKey, row));
+                    result.add(new Tuple2<>(bucketKey, copyRow(row, dstTableSchema)));
                     return result.iterator();
                 });
 
@@ -220,6 +256,17 @@ public class SparkDppUtils {
         Log.info("print bucket key map: {} ", bucketKeyMap.toString());
 
         return resultPairRDD;
+    }
+
+    private static InternalRow copyRow(InternalRow originalRow, StructType schema) {
+        int numFields = schema.size();
+        Object[] fieldValues = new Object[numFields];
+        StructField[] fields = schema.fields();
+        for (int i = 0; i < numFields; i++) {
+            fieldValues[i] =  originalRow.get(i, fields[i].dataType());
+        }
+
+        return new GenericInternalRow(fieldValues);
     }
 
     private static int getRepartitionSize(int bucketNumOfPartition, int resetBucketNum) {

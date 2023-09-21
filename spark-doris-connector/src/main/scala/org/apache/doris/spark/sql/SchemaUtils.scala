@@ -159,8 +159,8 @@ private[spark] object SchemaUtils {
       case StringType => Option(row.getUTF8String(ordinal)).map(_.toString).getOrElse(DataUtil.NULL_VALUE)
       case TimestampType =>
         LocalDateTime.ofEpochSecond(row.getLong(ordinal) / 100000, (row.getLong(ordinal) % 1000).toInt, ZoneOffset.UTC)
-        new Timestamp(row.getLong(ordinal) / 1000).toString
-      case DateType => DateTimeUtils.toJavaDate(row.getInt(ordinal)).toString
+        new Timestamp(row.getLong(ordinal) / 1000)
+      case DateType => DateTimeUtils.toJavaDate(row.getInt(ordinal))
       case BinaryType => row.getBinary(ordinal)
       case dt: DecimalType => row.getDecimal(ordinal, dt.precision, dt.scale)
       case at: ArrayType =>
